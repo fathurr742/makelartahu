@@ -2918,6 +2918,7 @@ enum e_option : uint32 {
 	OPTION_HANBOK		= 0x08000000,
 	OPTION_OKTOBERFEST	= 0x10000000,
 	OPTION_SUMMER2		= 0x20000000,
+	OPTION_AUTOATTACK   = 0x40000000,
 	OPTION_MAX,
 
 	// compound constant for older carts
