@@ -30,7 +30,7 @@
 #   CMP0017: Prefer files from the CMake module directory when including from there.
 # Update to 3.1 for CMAKE_CXX_STANDARD cross support definition
 set( CMAKE_LEGACY_CYGWIN_WIN32 0 )
-cmake_minimum_required( VERSION 3.1 )
+cmake_minimum_required( VERSION 3.5 )
 project( rAthena )
 if( CYGWIN )
 	unset( WIN32 )

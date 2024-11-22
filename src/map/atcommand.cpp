@@ -474,7 +474,53 @@ ACMD_FUNC(send)
 
 // Test Auto Attack
 
-static std::unordered_set<int> added_monsters;
+
+
+// Add this near the top with other declarations
+static int autopot_timer(int tid, t_tick tick, int id, intptr_t data);
+
+static int autopot_timer(int tid, t_tick tick, int id, intptr_t data) {
+		map_session_data* sd = map_id2sd(id);
+		if (sd == nullptr || !sd->state.autopot || pc_isdead(sd))
+				return 0;
+		
+	 // Check HP
+    if (sd->state.hp_pot_id && sd->state.hp_pot_threshold > 0) {
+        int current_hp = status_get_hp(&sd->bl);
+        int max_hp = status_get_max_hp(&sd->bl);
+        float hp_ratio = static_cast<float>(current_hp) / static_cast<float>(max_hp);
+        int hp_percent = static_cast<int>(hp_ratio * 100.0f);
+        
+        if (hp_percent < sd->state.hp_pot_threshold) {
+            int index;
+            ARR_FIND(0, MAX_INVENTORY, index, sd->inventory.u.items_inventory[index].nameid == sd->state.hp_pot_id);
+            if (sd->inventory.u.items_inventory[index].nameid == sd->state.hp_pot_id) {
+                pc_useitem(sd, index);
+            }
+        }
+    }
+    
+    // Check SP
+    if (sd->state.sp_pot_id && sd->state.sp_pot_threshold > 0) {
+        int current_sp = status_get_sp(&sd->bl);
+        int max_sp = status_get_max_sp(&sd->bl);
+        float sp_ratio = static_cast<float>(current_sp) / static_cast<float>(max_sp);
+        int sp_percent = static_cast<int>(sp_ratio * 100.0f);
+        
+        if (sp_percent < sd->state.sp_pot_threshold) {
+            int index;
+            ARR_FIND(0, MAX_INVENTORY, index, sd->inventory.u.items_inventory[index].nameid == sd->state.sp_pot_id);
+            if (sd->inventory.u.items_inventory[index].nameid == sd->state.sp_pot_id) {
+                pc_useitem(sd, index);
+            }
+        }
+    }
+		
+		// Continue checking every 500ms like the reference implementation
+		add_timer(tick + 500, autopot_timer, id, data);
+		return 0;
+}
+
 
 static int buildin_autoattack_sub(struct block_list *bl, va_list ap) {
     int *target_id = va_arg(ap, int *);
@@ -488,23 +534,40 @@ static void autoattack_motion(map_session_data* sd, int mob_id) {
     int target_id = 0;
     struct mob_data* md2 = nullptr;
     
-    for (int i = 0; i <= 9; i++) {
+    // Use attack_range from player state instead of fixed value
+    int range = sd->state.attack_range > 0 ? sd->state.attack_range : 9;
+    
+    for (int i = 0; i <= range; i++) {
         target_id = 0;
         map_foreachinarea(buildin_autoattack_sub, sd->bl.m, 
             sd->bl.x - i, sd->bl.y - i, sd->bl.x + i, sd->bl.y + i, 
             BL_MOB, &target_id, &md2);
             
         if (target_id && md2) {
-            if (mob_id != 0 && mob_id == md2->mob_id) {
-                unit_attack(&sd->bl, target_id, 1);
-                break;
-            } else if (mob_id == 0) {
+            bool should_attack = false;
+            
+            // If target list is empty, attack any monster
+            if (sd->state.target_monsters.empty()) {
+                should_attack = true;
+            }
+            // Otherwise check if monster is in target list
+            else {
+                for (uint32 target_id : sd->state.target_monsters) {
+                    if (md2->mob_id == target_id) {
+                        should_attack = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (should_attack) {
                 unit_attack(&sd->bl, target_id, 1);
                 break;
             }
         }
     }
 }
+
 
 TIMER_FUNC(autoattack_timer) {
     map_session_data* sd = map_id2sd(id);
@@ -523,46 +586,38 @@ TIMER_FUNC(autoattack_timer) {
  *------------------------------------------*/
 ACMD_FUNC(autoattack) {
     int mob_id = 0;
-    
-    if (!message || !*message) {
+if (!message || !*message) {
         clif_displaymessage(fd, "Usage:");
         clif_displaymessage(fd, "   @autoattack on - Enable auto-attack on all monsters");
         clif_displaymessage(fd, "   @autoattack off - Disable auto-attack");
+        clif_displaymessage(fd, "   @autoattack range <value> - Set attack range (1-9)");
         clif_displaymessage(fd, "   @autoattack +<mob_id> - Add monster to target list");
         clif_displaymessage(fd, "   @autoattack -<mob_id> - Remove monster from target list");
         clif_displaymessage(fd, "   @autoattack list - Show target list");
+        clif_displaymessage(fd, "   @autoattack pot <hp_id> <sp_id> <hp_%> <sp_%> - Configure autopot");
         return -1;
     }
     
-    if (strcmp(message, "on") == 0) {
-        if (!added_monsters.empty()) {
-            clif_displaymessage(fd, "Auto Attack: Targeting monsters in the list.");
-            for (int monster_id : added_monsters) {
-                add_timer(gettick() + 2000, autoattack_timer, sd->bl.id, (intptr_t)monster_id);
-            }
-        } else {
-            clif_displaymessage(fd, "Auto Attack: Targeting all monsters.");
-            add_timer(gettick() + 2000, autoattack_timer, sd->bl.id, 0);
+    if (strncmp(message, "range ", 6) == 0) {
+        int range = atoi(message + 6);
+        if (range < 1 || range > 9) {
+            clif_displaymessage(fd, "Range must be between 1 and 9.");
+            return -1;
         }
-        sd->state.autoattack = 1;
-        clif_displaymessage(fd, "Auto Attack activated.");
-        return 0;
-    }
-    
-    if (strcmp(message, "off") == 0) {
-        sd->state.autoattack = 0;
-        unit_stop_attack(&sd->bl);
-        clif_displaymessage(fd, "Auto Attack deactivated.");
+        sd->state.attack_range = range;
+        char msg[64];
+        sprintf(msg, "Attack range set to %d cells.", range);
+        clif_displaymessage(fd, msg);
         return 0;
     }
     
     if (strcmp(message, "list") == 0) {
-        if (added_monsters.empty()) {
+        if (sd->state.target_monsters.empty()) {
             clif_displaymessage(fd, "No monsters in target list.");
             return 0;
         }
         clif_displaymessage(fd, "Target List:");
-        for (int monster_id : added_monsters) {
+        for (uint32 monster_id : sd->state.target_monsters) {
             char buf[128];
             sprintf(buf, "- Monster ID: %d", monster_id);
             clif_displaymessage(fd, buf);
@@ -571,34 +626,48 @@ ACMD_FUNC(autoattack) {
     }
     
     if (message[0] == '+' || message[0] == '-') {
-        mob_id = atoi(message + 1);
+        int mob_id = atoi(message + 1);
         if (mob_id == 0) {
             clif_displaymessage(fd, "Invalid monster ID.");
             return -1;
         }
         
         if (message[0] == '+') {
-            if (added_monsters.find(mob_id) != added_monsters.end()) {
+            // Check if monster already in list
+            bool found = false;
+            for (uint32 target_id : sd->state.target_monsters) {
+                if (target_id == mob_id) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
                 clif_displaymessage(fd, "This monster is already in the list.");
                 return -1;
             }
-            added_monsters.insert(mob_id);
+            sd->state.target_monsters.push_back(mob_id);
             clif_displaymessage(fd, "Monster added to target list.");
         } else {
-            auto it = added_monsters.find(mob_id);
-            if (it == added_monsters.end()) {
-                clif_displaymessage(fd, "This monster is not in the list.");
-                return -1;
+            // Remove monster from list
+            for (auto it = sd->state.target_monsters.begin(); it != sd->state.target_monsters.end(); ++it) {
+                if (*it == mob_id) {
+                    sd->state.target_monsters.erase(it);
+                    clif_displaymessage(fd, "Monster removed from target list.");
+                    return 0;
+                }
             }
-            added_monsters.erase(it);
-            clif_displaymessage(fd, "Monster removed from target list.");
+            clif_displaymessage(fd, "This monster is not in the list.");
+            return -1;
         }
         return 0;
     }
     
+    
     clif_displaymessage(fd, "Invalid command format. Type @autoattack for usage info.");
     return -1;
 }
+
+
 
 // End
 
