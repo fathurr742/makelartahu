@@ -387,14 +387,7 @@ public:
 	//NOTE: When deciding to add a flag to state or special_state, take into consideration that state is preserved in
 	//status_calc_pc, while special_state is recalculated in each call. [Skotlex]
 	struct s_state {
-		uint32 autopot : 1;         // Whether autopot is enabled
-		uint16 hp_pot_id;           // Item ID of HP potion
-		uint16 sp_pot_id;           // Item ID of SP potion
-		uint16 hp_pot_threshold;    // HP % threshold to use pot
-		uint16 sp_pot_threshold;    // SP % threshold to use pot
-		uint32 autoattack : 1;      // Whether autoattack is enabled 
-		uint16 attack_range;        // Attack range for autoattack
-		std::vector<uint32> target_monsters; // List of target monster IDs
+		unsigned int autoattack : 1;
 		uint32 active : 1; //Marks active player (not active is logging in/out, or changing map servers)
 		uint32 menu_or_input : 1;// if a script is waiting for feedback from the player
 		uint32 dead_sit : 2;
@@ -465,6 +458,11 @@ public:
 		bool roulette_open;
 		t_itemid item_reform;
 		uint64 item_enchant_index;
+		uint32 autopot : 1;         // Whether autopot is enabled
+		uint16 hp_pot_id;           // Item ID of HP potion
+		uint16 sp_pot_id;           // Item ID of SP potion
+		uint16 hp_pot_threshold;    // HP % threshold to use pot
+		uint16 sp_pot_threshold;    // SP % threshold to use pot
 	} state;
 	struct {
 		unsigned char no_weapon_damage, no_magic_damage, no_misc_damage;
