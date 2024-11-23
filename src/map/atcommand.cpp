@@ -576,50 +576,12 @@ ACMD_FUNC(autoattack) {
         clif_displaymessage(fd, "Usage:");
         clif_displaymessage(fd, "   @autoattack on - Enable auto-attack on all monsters");
         clif_displaymessage(fd, "   @autoattack off - Disable auto-attack");
-        clif_displaymessage(fd, "   @autoattack +<mob_id> - Add monster to target list");
-        clif_displaymessage(fd, "   @autoattack -<mob_id> - Remove monster from target list");
+        clif_displaymessage(fd, "   @autoattack + <mob_id> - Add monster to target list");
+        clif_displaymessage(fd, "   @autoattack - <mob_id> - Remove monster from target list");
         clif_displaymessage(fd, "   @autoattack list - Show target list");
-        clif_displaymessage(fd, "   @autoattack pot <hp_id> <sp_id> <hp_%> <sp_%> - Configure autopot");
         return -1;
     }
     
-if (strncmp(message, "pot ", 4) == 0) {
-    int hp_pot, sp_pot, hp_thresh, sp_thresh;
-    if (sscanf(message + 4, "%d %d %d %d", &hp_pot, &sp_pot, &hp_thresh, &sp_thresh) != 4) {
-        clif_displaymessage(fd, "Invalid autopot format. Use: @autoattack pot <hp_pot_id> <sp_pot_id> <hp_%> <sp_%>");
-        return -1;
-    }
-    
-    if (hp_thresh < 0 || hp_thresh > 99 || sp_thresh < 0 || sp_thresh > 99) {
-        clif_displaymessage(fd, "Thresholds must be between 0 and 99 percent.");
-        return -1;
-    }
-
-    // Validate items exist
-    if (hp_pot > 0 && itemdb_exists(hp_pot) == NULL) {
-        clif_displaymessage(fd, "Invalid item ID for HP potion.");
-        return -1;
-    }
-    if (sp_pot > 0 && itemdb_exists(sp_pot) == NULL) {
-        clif_displaymessage(fd, "Invalid item ID for SP potion.");
-        return -1;
-    }
-
-    // Set values
-    sd->state.autopot = 1;
-    sd->state.hp_pot_id = hp_pot;
-    sd->state.sp_pot_id = sp_pot;
-    sd->state.hp_pot_threshold = hp_thresh;
-    sd->state.sp_pot_threshold = sp_thresh;
-    
-    add_timer(gettick() + 500, autopot_timer, sd->bl.id, 0);
-    
-    char msg[128];
-    sprintf(msg, "Autopot configured - HP: %d%% (Item: %d), SP: %d%% (Item: %d)", 
-        hp_thresh, hp_pot, sp_thresh, sp_pot);
-    clif_displaymessage(fd, msg);
-    return 0;
-}
 
     // In the "on" section, add:
     if (strcmp(message, "on") == 0) {
@@ -647,27 +609,58 @@ if (strncmp(message, "pot ", 4) == 0) {
     // In the "off" section, add:
     if (strcmp(message, "off") == 0) {
         sd->state.autoattack = 0;
-        sd->state.autopot = 0;
         unit_stop_attack(&sd->bl);
-        clif_displaymessage(fd, "Auto Attack and Autopot deactivated.");
+        clif_displaymessage(fd, "Auto Attack deactivated.");
         return 0;
     }
 
-		
-    if (strcmp(message, "list") == 0) {
-        if (added_monsters.empty()) {
-            clif_displaymessage(fd, "No monsters in target list.");
-            return 0;
-        }
-        clif_displaymessage(fd, "Target List:");
-        for (int monster_id : added_monsters) {
-            char buf[128];
-            sprintf(buf, "- Monster ID: %d", monster_id);
-            clif_displaymessage(fd, buf);
-        }
-        return 0;
-    }
-    
+	if (strcmp(message, "list") == 0) {
+			// First show monsters in target list
+			if (!added_monsters.empty()) {
+					clif_displaymessage(fd, "=== Target List ===");
+					for (int monster_id : added_monsters) {
+							char buf[128];
+							safesnprintf(buf, sizeof(buf), "- Monster ID: %d", monster_id);
+							clif_displaymessage(fd, buf);
+					}
+			} else {
+					clif_displaymessage(fd, "Target list is empty.");
+			}
+	
+			// Then show nearby monsters
+			struct monster_count_data {
+					int count;
+					int fd;
+			} mcd = {0, fd};
+	
+			// Define a sub-function to count monsters
+			auto monster_count_sub = [](struct block_list* bl, va_list ap) -> int {
+					struct monster_count_data* mcd = va_arg(ap, struct monster_count_data*);
+					struct mob_data* md = (struct mob_data*)bl;
+					
+					if (!md) return 0;
+					
+					char buf[128];
+					safesnprintf(buf, sizeof(buf), "Found monster ID: %d at position (%d,%d)", 
+							md->mob_id, md->bl.x, md->bl.y);
+					clif_displaymessage(mcd->fd, buf);
+					mcd->count++;
+					
+					return 1;
+			};
+	
+			clif_displaymessage(fd, "=== Nearby Monsters ===");
+			map_foreachinarea(monster_count_sub, sd->bl.m,
+					sd->bl.x - 10, sd->bl.y - 10,
+					sd->bl.x + 10, sd->bl.y + 10,
+					BL_MOB, &mcd);
+	
+			char buf[128];
+			safesnprintf(buf, sizeof(buf), "Total nearby monsters: %d", mcd.count);
+			clif_displaymessage(fd, buf);
+			return 0;
+	}
+
     if (message[0] == '+' || message[0] == '-') {
         mob_id = atoi(message + 1);
         if (mob_id == 0) {
@@ -696,6 +689,78 @@ if (strncmp(message, "pot ", 4) == 0) {
     
     clif_displaymessage(fd, "Invalid command format. Type @autoattack for usage info.");
     return -1;
+}
+
+ACMD_FUNC(autopot) {
+		if (!message || !*message) {
+				clif_displaymessage(fd, "Usage:");
+				clif_displaymessage(fd, "@autopot on - Enable autopot");
+				clif_displaymessage(fd, "@autopot off - Disable autopot");
+				clif_displaymessage(fd, "@autopot config <hp_pot_id> <sp_pot_id> <hp_%> <sp_%> - Configure autopot");
+				return -1;
+		}
+
+		char subcmd[32];
+		int hp_pot = 0, sp_pot = 0, hp_thresh = 0, sp_thresh = 0;
+
+		if (sscanf(message, "%31s", subcmd) < 1) {
+				clif_displaymessage(fd, "Invalid command format.");
+				return -1;
+		}
+
+		if (strcmpi(subcmd, "on") == 0) {
+				if (!sd->state.hp_pot_id && !sd->state.sp_pot_id) {
+						clif_displaymessage(fd, "Please configure autopot settings first using @autopot config.");
+						return -1;
+				}
+				sd->state.autopot = 1;
+				add_timer(gettick() + 500, autopot_timer, sd->bl.id, 0);
+				clif_displaymessage(fd, "Autopot enabled.");
+				return 0;
+		}
+		
+		if (strcmpi(subcmd, "off") == 0) {
+				sd->state.autopot = 0;
+				clif_displaymessage(fd, "Autopot disabled.");
+				return 0;
+		}
+		
+		if (strcmpi(subcmd, "config") == 0) {
+				if (sscanf(message, "%31s %d %d %d %d", subcmd, &hp_pot, &sp_pot, &hp_thresh, &sp_thresh) != 5) {
+						clif_displaymessage(fd, "Invalid format. Use: @autopot config <hp_pot_id> <sp_pot_id> <hp_%> <sp_%>");
+						return -1;
+				}
+				
+				if (hp_thresh < 0 || hp_thresh > 99 || sp_thresh < 0 || sp_thresh > 99) {
+						clif_displaymessage(fd, "Thresholds must be between 0 and 99 percent.");
+						return -1;
+				}
+
+				// Validate items exist
+				if (hp_pot > 0 && itemdb_exists(hp_pot) == NULL) {
+						clif_displaymessage(fd, "Invalid item ID for HP potion.");
+						return -1;
+				}
+				if (sp_pot > 0 && itemdb_exists(sp_pot) == NULL) {
+						clif_displaymessage(fd, "Invalid item ID for SP potion.");
+						return -1;
+				}
+
+				// Set values
+				sd->state.hp_pot_id = hp_pot;
+				sd->state.sp_pot_id = sp_pot;
+				sd->state.hp_pot_threshold = hp_thresh;
+				sd->state.sp_pot_threshold = sp_thresh;
+				
+				char msg[128];
+				sprintf(msg, "Autopot configured - HP: %d%% (Item: %d), SP: %d%% (Item: %d)", 
+						hp_thresh, hp_pot, sp_thresh, sp_pot);
+				clif_displaymessage(fd, msg);
+				return 0;
+		}
+
+		clif_displaymessage(fd, "Unknown subcommand. Use 'on', 'off', or 'config'.");
+		return -1;
 }
 
 
@@ -11281,6 +11346,7 @@ void atcommand_basecommands(void) {
 #include <custom/atcommand_def.inc>
 		ACMD_DEF2R("warp", mapmove, ATCMD_NOCONSOLE),
 		ACMD_DEF(autoattack),
+		ACMD_DEF(autopot),
 		ACMD_DEF(where),
 		ACMD_DEF(jumpto),
 		ACMD_DEF(jump),

@@ -1,141 +1,149 @@
-prontera,162,189,1 script  AutoBot	123,{
+-	script	AutoBot	FAKE_NPC,{
 OnInit:
-	bindatcmd "autobot",strnpcinfo(3)+"::OnMenu";
-	end;
+    bindatcmd "autobot", strnpcinfo(3)+"::OnAutoBot";
+    setarray .blackList[0],0;
+    
+    // Define potion IDs
+    setarray .@hp_potions[0], 501, 502, 503, 504; // Red, Orange, Yellow, White
+    setarray .@sp_potions[0], 505; // Blue
+    end;
 
-OnMenu:
-	mes "[ ^FF7700AutoBot System^000000 ]";
-	mes "Welcome to AutoBot Configuration";
-	mes "Auto-Attack Status: " + (getd("@autoattack") ? "^00FF00ON^000000" : "^FF0000OFF^000000");
-	mes "Auto-Pot Status: " + (getd("@autopot") ? "^00FF00ON^000000" : "^FF0000OFF^000000");
-	mes "^000000========================^000000";
-	
-	.@menu = select(
-		"[1] Auto-Attack Settings",
-		"[2] Auto-Pot Settings", 
-		"[3] View Current Settings",
-		"[Exit]"
-	);
-	
-	switch(.@menu) {
-		case 1:
-			mes "[ ^FF7700Auto-Attack Settings^000000 ]";
-			mes "Current Status: " + (getd("@autoattack") ? "^00FF00ON^000000" : "^FF0000OFF^000000");
-			mes "Attack Range: " + getd("@attack_range");
-			mes "^000000========================^000000";
-			
-			.@attack_menu = select(
-				"Toggle Auto-Attack",
-				"Set Attack Range",
-				"Manage Target List",
-				"Back"
-			);
-			
-			if (.@attack_menu == 1) {
-				if (getd("@autoattack")) {
-					atcommand "@autoattack off";
-					mes "Auto-Attack: ^FF0000OFF^000000";
-				} else {
-					atcommand "@autoattack on";
-					mes "Auto-Attack: ^00FF00ON^000000";
-				}
-			}
-			else if (.@attack_menu == 2) {
-				mes "Enter attack range (1-9):";
-				input .@range;
-				if (.@range < 1 || .@range > 9) {
-					mes "Invalid range! Using default (5)";
-					.@range = 5;
-				}
-				atcommand "@autoattack range "+.@range;
-				setd "@attack_range", .@range;
-				mes "Attack range set to: " + .@range;
-			}
-			else if (.@attack_menu == 3) {
-				mes "[ ^FF7700Target Management^000000 ]";
-				mes "Enter monster ID to add/remove:";
-				mes "(Use + to add, - to remove)";
-				mes "Example: +1002 or -1002";
-				input .@input$;
-				
-				if (.@input$ == "list") {
-					atcommand "@autoattack list";
-				} else {
-					atcommand "@autoattack "+.@input$;
-				}
-			}
-			break;
-			
-		case 2:
-			mes "[ ^FF7700Auto-Pot Settings^000000 ]";
-			mes "Current Status: " + (getd("@autopot") ? "^00FF00ON^000000" : "^FF0000OFF^000000");
-			if (getd("@hp_pot_id"))
-				mes "HP Potion: ^0055FF" + getitemname(getd("@hp_pot_id")) + "^000000";
-			if (getd("@sp_pot_id"))
-				mes "SP Potion: ^0055FF" + getitemname(getd("@sp_pot_id")) + "^000000";
-			mes "^000000========================^000000";
-			
-			.@pot_menu = select(
-				"Configure HP Potion",
-				"Configure SP Potion",
-				"Toggle Auto-Pot",
-				"Back"
-			);
-			
-			if (.@pot_menu == 1) {
-				mes "Enter HP potion item ID:";
-				input .@hp_id;
-				mes "Enter HP threshold % (1-99):";
-				input .@hp_thresh;
-				if (.@hp_thresh < 1 || .@hp_thresh > 99) {
-					mes "Invalid threshold! Using 50%";
-					.@hp_thresh = 50;
-				}
-				setd "@hp_pot_id", .@hp_id;
-				setd "@hp_threshold", .@hp_thresh;
-				atcommand "@autoattack pot "+.@hp_id+" 0 "+.@hp_thresh+" 0";
-				mes "HP Potion settings updated!";
-			}
-			else if (.@pot_menu == 2) {
-				mes "Enter SP potion item ID:";
-				input .@sp_id;
-				mes "Enter SP threshold % (1-99):";
-				input .@sp_thresh;
-				if (.@sp_thresh < 1 || .@sp_thresh > 99) {
-					mes "Invalid threshold! Using 50%";
-					.@sp_thresh = 50;
-				}
-				setd "@sp_pot_id", .@sp_id;
-				setd "@sp_threshold", .@sp_thresh;
-				atcommand "@autoattack pot 0 "+.@sp_id+" 0 "+.@sp_thresh;
-				mes "SP Potion settings updated!";
-			}
-			else if (.@pot_menu == 3) {
-				if (getd("@autopot")) {
-					setd "@autopot", 0;
-					mes "Auto-Pot: ^FF0000OFF^000000";
-				} else {
-					setd "@autopot", 1;
-					mes "Auto-Pot: ^00FF00ON^000000";
-				}
-			}
-			break;
-			
-		case 3:
-			mes "[ ^FF7700Current Settings^000000 ]";
-			mes "Auto-Attack: " + (getd("@autoattack") ? "^00FF00ON^000000" : "^FF0000OFF^000000");
-			mes "Attack Range: " + getd("@attack_range");
-			mes "Auto-Pot: " + (getd("@autopot") ? "^00FF00ON^000000" : "^FF0000OFF^000000");
-			if (getd("@hp_pot_id")) {
-				mes "HP Potion: " + getitemname(getd("@hp_pot_id"));
-				mes "HP Threshold: " + getd("@hp_threshold") + "%";
-			}
-			if (getd("@sp_pot_id")) {
-				mes "SP Potion: " + getitemname(getd("@sp_pot_id"));
-				mes "SP Threshold: " + getd("@sp_threshold") + "%";
-			}
-			break;
-	}
-	
-	close;
+OnAutoBot:
+    set @found_potions, 0;
+    deletearray @pot_menu$[0], getarraysize(@pot_menu$);
+    deletearray @pot_ids[0], getarraysize(@pot_ids);
+    
+    mes "[ ^FF7700AutoBot System^000000 ]";
+    mes "Welcome to AutoBot Configuration";
+    mes "Auto-Pot Status: " + (getd("@autopot") ? "^00FF00ON^000000" : "^FF0000OFF^000000");
+    mes "^000000========================^000000";
+  
+    
+    switch(select("Auto Pot Settings:^FF0000Exit^000000")) {
+        case 1:
+            clear;
+            mes "[ ^FF7700Auto-Pot Settings^000000 ]";
+            mes "Current Configuration:";
+            if (getd(".autopot_hp_id"))
+                mes "HP Potion: ^0055FF" + getitemname(getd(".autopot_hp_id")) + "^000000 (" + getd(".autopot_hp_thresh") + "%)";
+            if (getd(".autopot_sp_id"))
+                mes "SP Potion: ^0055FF" + getitemname(getd(".autopot_sp_id")) + "^000000 (" + getd(".autopot_sp_thresh") + "%)";
+            next;
+            // HP Potion Selection
+            set @current_type, 0; // 0 for HP
+            callsub S_BuildPotMenu;
+            
+            if (@found_potions == 0) {
+                mes "No HP potions found in inventory!";
+            } else {
+                mes "Select HP Potion:";
+                .@menu$ = "";
+                for (.@i = 0; .@i < @found_potions; .@i++) {
+                    if (.@i) .@menu$ += ":" ;
+                    .@menu$ += @pot_menu$[.@i];
+                }
+                .@menu$ += ":Skip";
+                
+                .@choice = select(.@menu$) - 1;
+                if (.@choice != @found_potions) {
+                    mes "Enter HP threshold % (1-99):";
+                    input .@hp_thresh;
+                    if (.@hp_thresh < 1 || .@hp_thresh > 99) {
+                        mes "Invalid threshold! Using 50%";
+                        .@hp_thresh = 50;
+                    }
+                    .@hp_pot_id = @pot_ids[.@choice];
+                }
+            }
+            
+            next;
+            
+            // SP Potion Selection
+            set @current_type, 1; // 1 for SP
+            deletearray @pot_menu$[0], getarraysize(@pot_menu$);
+            deletearray @pot_ids[0], getarraysize(@pot_ids);
+            set @found_potions, 0;
+            
+            callsub S_BuildPotMenu;
+            
+            if (@found_potions == 0) {
+                mes "No SP potions found in inventory!";
+            } else {
+                mes "Select SP Potion:";
+                .@menu$ = "";
+                for (.@i = 0; .@i < @found_potions; .@i++) {
+                    if (.@i) .@menu$ += ":" ;
+                    .@menu$ += @pot_menu$[.@i];
+                }
+                .@menu$ += ":Skip";
+                
+                .@choice = select(.@menu$) - 1;
+                if (.@choice != @found_potions) {
+                    mes "Enter SP threshold % (1-99):";
+                    input .@sp_thresh;
+                    if (.@sp_thresh < 1 || .@sp_thresh > 99) {
+                        mes "Invalid threshold! Using 50%";
+                        .@sp_thresh = 50;
+                    }
+                    .@sp_pot_id = @pot_ids[.@choice];
+                }
+            }
+            
+            if (.@hp_pot_id > 0 || .@sp_pot_id > 0) {
+                // Store the values
+                if (.@hp_pot_id > 0) {
+                    setd ".autopot_hp_id", .@hp_pot_id;
+                    setd ".autopot_hp_thresh", .@hp_thresh;
+                }
+                if (.@sp_pot_id > 0) {
+                    setd ".autopot_sp_id", .@sp_pot_id;
+                    setd ".autopot_sp_thresh", .@sp_thresh;
+                }
+                
+                // Enable autopot with new settings
+                setd "@autopot", 1;
+                set .@cmd$, sprintf("@autopot config %d %d %d %d", 
+                getd(".autopot_hp_id"), getd(".autopot_sp_id"),
+                getd(".autopot_hp_thresh"), getd(".autopot_sp_thresh"));
+                atcommand .@cmd$;
+                atcommand "@autopot on";
+                
+                mes "Auto Pot Configuration Complete!";
+                if (.@hp_pot_id)
+                    mes "HP Pot: " + getitemname(.@hp_pot_id) + " (" + .@hp_thresh + "%)";
+                if (.@sp_pot_id)
+                    mes "SP Pot: " + getitemname(.@sp_pot_id) + " (" + .@sp_thresh + "%)";
+            }
+            close;
+        case 3:
+            close;
+    }
+    end;
+
+S_BuildPotMenu:
+    getinventorylist;
+    
+    for(.@i = 0; .@i < @inventorylist_count; .@i++) {
+        .@itemid = @inventorylist_id[.@i];
+        .@amount = countitem(.@itemid);
+        
+        if (@current_type == 0) { // HP potions
+            if (.@itemid == 501 || .@itemid == 502 || .@itemid == 503 || .@itemid == 504) {
+                if (.@amount > 0) {
+                    @pot_menu$[@found_potions] = getitemname(.@itemid) + " (" + .@amount + "x)";
+                    @pot_ids[@found_potions] = .@itemid;
+                    set @found_potions, @found_potions + 1;
+                }
+            }
+        } else { // SP potions
+            if (.@itemid == 505) {
+                if (.@amount > 0) {
+                    @pot_menu$[@found_potions] = getitemname(.@itemid) + " (" + .@amount + "x)";
+                    @pot_ids[@found_potions] = .@itemid;
+                    set @found_potions, @found_potions + 1;
+                }
+            }
+        }
+    }
+    return;
 }
