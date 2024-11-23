@@ -532,26 +532,61 @@ static int buildin_autoattack_sub(struct block_list *bl, va_list ap) {
 }
 
 static void autoattack_motion(map_session_data* sd, int mob_id) {
-    int target_id = 0;
-    struct mob_data* md2 = nullptr;
-    
-    for (int i = 0; i <= 9; i++) {
-        target_id = 0;
-        map_foreachinarea(buildin_autoattack_sub, sd->bl.m, 
-            sd->bl.x - i, sd->bl.y - i, sd->bl.x + i, sd->bl.y + i, 
-            BL_MOB, &target_id, &md2);
-            
-        if (target_id && md2) {
-            if (mob_id != 0 && mob_id == md2->mob_id) {
-                unit_attack(&sd->bl, target_id, 1);
-                break;
-            } else if (mob_id == 0) {
-                unit_attack(&sd->bl, target_id, 1);
-                break;
-            }
-        }
-    }
+		int target_id = 0;
+		struct mob_data* md2 = nullptr;
+		static int last_walk_time = 0;
+		
+		bool found_monster = false;
+		for (int i = 0; i <= 9; i++) {
+				target_id = 0;
+				map_foreachinarea(buildin_autoattack_sub, sd->bl.m, 
+						sd->bl.x - i, sd->bl.y - i, sd->bl.x + i, sd->bl.y + i, 
+						BL_MOB, &target_id, &md2);
+						
+				if (target_id && md2) {
+						if (mob_id != 0 && mob_id == md2->mob_id) {
+								unit_attack(&sd->bl, target_id, 1);
+								found_monster = true;
+								break;
+						} else if (mob_id == 0) {
+								unit_attack(&sd->bl, target_id, 1);
+								found_monster = true;
+								break;
+						}
+				}
+		}
+		
+		// If no monster found and not currently walking, try to walk
+		if (!found_monster && sd->ud.walktimer == INVALID_TIMER) {
+				int current_time = (int)time(NULL);
+				if (current_time - last_walk_time >= 3) { // Only try to walk every 3 seconds
+						int walk_range = 10;
+						int tries = 0;
+						int new_x, new_y;
+						
+						// Try up to 5 different random positions
+						while (tries < 5) {
+								new_x = sd->bl.x + (rnd() % (walk_range * 2) - walk_range);
+								new_y = sd->bl.y + (rnd() % (walk_range * 2) - walk_range);
+								
+								// Make sure coordinates are within map bounds
+								new_x = cap_value(new_x, 0, map[sd->bl.m].xs - 1);
+								new_y = cap_value(new_y, 0, map[sd->bl.m].ys - 1);
+								
+								// Check if we can walk to this position
+								if (unit_can_reach_pos(&sd->bl, new_x, new_y, 2)) {
+										if (unit_walktoxy(&sd->bl, new_x, new_y, 2)) {
+												last_walk_time = current_time;
+												break;
+										}
+								}
+								tries++;
+						}
+				}
+		}
 }
+
+
 
 TIMER_FUNC(autoattack_timer) {
     map_session_data* sd = map_id2sd(id);
@@ -561,10 +596,11 @@ TIMER_FUNC(autoattack_timer) {
     int mob_id = (int)data;
     autoattack_motion(sd, mob_id);
     
-    add_timer(tick + 2000, autoattack_timer, id, data);
+    // Shorter interval when walking (1 second), normal interval (2 seconds) for attacking
+    int next_interval = (sd->ud.walktimer != INVALID_TIMER) ? 1000 : 2000;
+    add_timer(tick + next_interval, autoattack_timer, id, data);
     return 0;
 }
-
 /*==========================================
  * @autoattack
  *------------------------------------------*/
@@ -614,52 +650,59 @@ ACMD_FUNC(autoattack) {
         return 0;
     }
 
-	if (strcmp(message, "list") == 0) {
-			// First show monsters in target list
-			if (!added_monsters.empty()) {
-					clif_displaymessage(fd, "=== Target List ===");
-					for (int monster_id : added_monsters) {
-							char buf[128];
-							safesnprintf(buf, sizeof(buf), "- Monster ID: %d", monster_id);
-							clif_displaymessage(fd, buf);
-					}
-			} else {
-					clif_displaymessage(fd, "Target list is empty.");
-			}
-	
-			// Then show nearby monsters
-			struct monster_count_data {
-					int count;
-					int fd;
-			} mcd = {0, fd};
-	
-			// Define a sub-function to count monsters
-			auto monster_count_sub = [](struct block_list* bl, va_list ap) -> int {
-					struct monster_count_data* mcd = va_arg(ap, struct monster_count_data*);
-					struct mob_data* md = (struct mob_data*)bl;
-					
-					if (!md) return 0;
-					
-					char buf[128];
-					safesnprintf(buf, sizeof(buf), "Found monster ID: %d at position (%d,%d)", 
-							md->mob_id, md->bl.x, md->bl.y);
-					clif_displaymessage(mcd->fd, buf);
-					mcd->count++;
-					
-					return 1;
-			};
-	
-			clif_displaymessage(fd, "=== Nearby Monsters ===");
-			map_foreachinarea(monster_count_sub, sd->bl.m,
-					sd->bl.x - 10, sd->bl.y - 10,
-					sd->bl.x + 10, sd->bl.y + 10,
-					BL_MOB, &mcd);
-	
-			char buf[128];
-			safesnprintf(buf, sizeof(buf), "Total nearby monsters: %d", mcd.count);
-			clif_displaymessage(fd, buf);
-			return 0;
-	}
+if (strcmp(message, "list") == 0) {
+		// First show monsters in target list
+		if (!added_monsters.empty()) {
+				clif_displaymessage(fd, "=== Target List ===");
+				std::string monster_list = "Monsters: ";
+				for (int monster_id : added_monsters) {
+						char buf[32];
+						safesnprintf(buf, sizeof(buf), "%d, ", monster_id);
+						monster_list += buf;
+				}
+				// Remove last comma and space
+				monster_list = monster_list.substr(0, monster_list.length() - 2);
+				clif_displaymessage(fd, monster_list.c_str());
+		} else {
+				clif_displaymessage(fd, "Target list is empty.");
+		}
+
+		// Then show nearby monsters
+		struct monster_count_data {
+				int count;
+				int fd;
+		} mcd = {0, fd};
+
+		// Define a sub-function to count monsters
+		auto monster_count_sub = [](struct block_list* bl, va_list ap) -> int {
+				struct monster_count_data* mcd = va_arg(ap, struct monster_count_data*);
+				struct mob_data* md = (struct mob_data*)bl;
+				
+				if (!md) return 0;
+				
+				if (mcd->count == 0) {
+						clif_displaymessage(mcd->fd, "=== Nearby Monsters ===");
+				}
+				
+				char buf[128];
+				const char* monster_name = mob_db.find(md->mob_id)->name.c_str();
+				safesnprintf(buf, sizeof(buf), "ID: %d - %s", md->mob_id, monster_name);
+				clif_displaymessage(mcd->fd, buf);
+				mcd->count++;
+				
+				return 1;
+		};
+
+		map_foreachinarea(monster_count_sub, sd->bl.m,
+				sd->bl.x - 10, sd->bl.y - 10,
+				sd->bl.x + 10, sd->bl.y + 10,
+				BL_MOB, &mcd);
+
+		if (mcd.count == 0) {
+				clif_displaymessage(fd, "No monsters nearby.");
+		}
+		return 0;
+}
 
     if (message[0] == '+' || message[0] == '-') {
         mob_id = atoi(message + 1);
